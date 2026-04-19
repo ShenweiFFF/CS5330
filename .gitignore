@@ -1,0 +1,24 @@
+# Dataset (too large for GitHub)
+data/
+
+# Checkpoints
+checkpoints/
+*.pth
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Generated files
+splits/*_10class.txt
+PersonA_Report_Draft.docx
+generate_report.py
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
