@@ -1,31 +1,35 @@
 """
-Training script for C3D on UCF-101.
-Supports "3d_only" and "fusion" modes via config.FUSION_MODE.
+Training script for the RGB branch (R3D18) on UCF-101.
+
+Supports "rgb_only" mode (standalone) and "fusion" mode once Person B's
+precomputed flow features are integrated.  See config.FUSION_MODE.
 
 Usage:
-    python train.py                        # train from scratch
+    python train.py                              # train from scratch
     python train.py --resume checkpoints/last.pth   # resume training
 """
 
 import os
 import time
 import argparse
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import MultiStepLR
 
 import config
 from dataset import get_loaders
 from models import FusionModel
 
 
-def accuracy(output, target, topk=(1, 5)):
+def accuracy(output: torch.Tensor, target: torch.Tensor,
+             topk: tuple[int, ...] = (1, 5)) -> list[float]:
     with torch.no_grad():
-        maxk = max(topk)
+        maxk  = max(topk)
         batch = target.size(0)
         _, pred = output.topk(maxk, dim=1, largest=True, sorted=True)
-        pred = pred.t()
+        pred    = pred.t()
         correct = pred.eq(target.view(1, -1).expand_as(pred))
         return [
             correct[:k].reshape(-1).float().sum().mul_(100.0 / batch).item()
@@ -33,9 +37,11 @@ def accuracy(output, target, topk=(1, 5)):
         ]
 
 
-def train_one_epoch(model, loader, criterion, optimizer, device, epoch):
+def train_one_epoch(model: nn.Module, loader, criterion: nn.Module,
+                    optimizer: optim.Optimizer, device: torch.device,
+                    epoch: int) -> None:
     model.train()
-    total_loss, total_top1, total_top5 = 0.0, 0.0, 0.0
+    total_loss = total_top1 = total_top5 = 0.0
     t0 = time.time()
 
     for i, (clips, labels) in enumerate(loader):
@@ -64,9 +70,10 @@ def train_one_epoch(model, loader, criterion, optimizer, device, epoch):
 
 
 @torch.no_grad()
-def evaluate(model, loader, criterion, device, epoch):
+def evaluate(model: nn.Module, loader, criterion: nn.Module,
+             device: torch.device, epoch: int) -> float:
     model.eval()
-    total_loss, total_top1, total_top5 = 0.0, 0.0, 0.0
+    total_loss = total_top1 = total_top5 = 0.0
 
     for clips, labels in loader:
         clips  = clips.to(device, non_blocking=True)
@@ -85,14 +92,15 @@ def evaluate(model, loader, criterion, device, epoch):
     return total_top1 / n
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--resume", default=None, help="Path to checkpoint to resume from")
+    parser.add_argument("--resume", default=None,
+                        help="Path to checkpoint to resume from")
     args = parser.parse_args()
 
     os.makedirs(config.CKPT_DIR, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
+    print(f"Device: {device}  |  mode: {config.FUSION_MODE}")
 
     train_loader, test_loader = get_loaders()
     print(f"Train batches: {len(train_loader)} | Test batches: {len(test_loader)}")
@@ -111,8 +119,12 @@ def main():
         momentum=0.9,
         weight_decay=config.WEIGHT_DECAY,
     )
-    scheduler = StepLR(optimizer, step_size=config.LR_DECAY_STEP,
-                       gamma=config.LR_DECAY_GAMMA)
+    # MultiStepLR: decay LR ×0.1 at epochs 30 and 45 (paper §IV.D)
+    scheduler = MultiStepLR(
+        optimizer,
+        milestones=config.LR_DECAY_MILESTONES,
+        gamma=config.LR_DECAY_GAMMA,
+    )
 
     start_epoch = 1
     best_top1   = 0.0
@@ -121,10 +133,9 @@ def main():
         ckpt = torch.load(args.resume, map_location=device)
         model.load_state_dict(ckpt["model"])
         optimizer.load_state_dict(ckpt["optimizer"])
+        scheduler.load_state_dict(ckpt["scheduler"])
         start_epoch = ckpt["epoch"] + 1
         best_top1   = ckpt.get("top1", 0.0)
-        for _ in range(ckpt["epoch"]):
-            scheduler.step()
         print(f"Resumed from epoch {ckpt['epoch']} (best top-1: {best_top1:.2f}%)")
 
     for epoch in range(start_epoch, config.NUM_EPOCHS + 1):
@@ -136,6 +147,7 @@ def main():
             "epoch":     epoch,
             "model":     model.state_dict(),
             "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
             "top1":      top1,
         }
         torch.save(state, os.path.join(config.CKPT_DIR, "last.pth"))

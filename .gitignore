@@ -22,3 +22,14 @@ generate_report.py
 # OS
 .DS_Store
 Thumbs.db
+
+# Large demo video (host on Google Drive / YouTube instead)
+*.mp4
+
+# Office temp lock files
+~$*
+
+# Flow branch build artifacts
+flow_branch/build/
+flow_branch/ucf101_flow/
+flow_branch/*.pt
