@@ -23,9 +23,6 @@ generate_report.py
 .DS_Store
 Thumbs.db
 
-# Large demo video (host on Google Drive / YouTube instead)
-*.mp4
-
 # Office temp lock files
 ~$*
 
